@@ -1,0 +1,156 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', sans-serif;
+  color: #1e1d1b;
+  background: radial-gradient(circle at top, #f3ede2 0%, #e7f0f2 45%, #d7e3e8 100%);
+}
+
+.app {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 12px 30px rgba(19, 43, 62, 0.12);
+  margin-bottom: 20px;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.status {
+  font-size: 14px;
+  color: #3a4a56;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.panel {
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 14px 25px rgba(13, 36, 52, 0.12);
+}
+
+.panel h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 18px;
+}
+
+.audio-controls {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.buttons {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 10px;
+  background: #1e3545;
+  color: #fdfbf7;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.file-name {
+  font-size: 13px;
+  color: #42515c;
+}
+
+.hint {
+  font-size: 12px;
+  color: #4d5b66;
+}
+
+.transcript {
+  display: grid;
+  gap: 10px;
+}
+
+.segment {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  background: #f6f2eb;
+  border-radius: 10px;
+}
+
+.segment.partial {
+  background: #e4edf1;
+  font-style: italic;
+}
+
+.speaker {
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.6px;
+  color: #2f3c45;
+}
+
+.assist-card {
+  display: grid;
+  gap: 10px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #4f5d68;
+}
+
+.next-step {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.meta,
+.sources {
+  font-size: 12px;
+  color: #49545d;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.empty {
+  color: #6a7680;
+  font-size: 14px;
+}
+
+@media (max-width: 720px) {
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+}

@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.cache/
+.parcel-cache/
+.vite/
+
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+.env
+.env.*.local
+.env.local
+
+.DS_Store
+Thumbs.db
+
+# AWS / serverless
+.aws-sam/
+cdk.out/
+.serverless/

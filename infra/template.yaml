@@ -1,0 +1,486 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Call Copilot POC - Serverless Infrastructure (ready to deploy)
+
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+  EventBusName:
+    Type: String
+    Default: CallCopilotBus
+  CallStateTableName:
+    Type: String
+    Default: CallStateTable
+  ConnectionsTableName:
+    Type: String
+    Default: ConnectionsTable
+  RecordingsBucketName:
+    Type: String
+    Default: ''
+
+Conditions:
+  UseCustomBucketName: !Not [!Equals [!Ref RecordingsBucketName, '']]
+
+Globals:
+  Function:
+    Runtime: nodejs18.x
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        EVENT_BUS_NAME: !Ref EventBusName
+        CALL_STATE_TABLE: !Ref CallStateTable
+        CONNECTIONS_TABLE: !Ref ConnectionsTable
+        S3_BUCKET: !Ref RecordingsBucket
+        WS_API_ENDPOINT: !Sub "https://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+        WS_URL: !Sub "wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+
+Resources:
+  CallStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref CallStateTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: call_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: call_id
+          KeyType: HASH
+
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref ConnectionsTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: call_id
+          AttributeType: S
+        - AttributeName: connection_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: call_id
+          KeyType: HASH
+        - AttributeName: connection_id
+          KeyType: RANGE
+
+  RecordingsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If [UseCustomBucketName, !Ref RecordingsBucketName, !Ref AWS::NoValue]
+
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Ref EventBusName
+
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref StageName
+      EndpointConfiguration: REGIONAL
+      Cors:
+        AllowMethods: "'OPTIONS,GET,POST'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'http://localhost:5173'"
+
+  CreateCallFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/create_call_handler/index.handler
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref CallStateTable
+      Events:
+        CreateCall:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /calls
+            Method: POST
+
+  StartCallFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/start_call_handler/index.handler
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref CallStateTable
+      Events:
+        StartCall:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /calls/{call_id}/start
+            Method: POST
+
+  UploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/upload_handler/index.handler
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref RecordingsBucket
+      Events:
+        Upload:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upload
+            Method: POST
+
+  AudioStreamFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/audio_stream_handler/index.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: !GetAtt EventBus.Arn
+
+  SttStreamFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/stt_stream_handler/index.handler
+      Environment:
+        Variables:
+          MOCK_STT: 'true'
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: !GetAtt EventBus.Arn
+
+  ContextEngineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/context_engine/index.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CallStateTable
+        - DynamoDBWritePolicy:
+            TableName: !Ref CallStateTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: !GetAtt EventBus.Arn
+
+  TriggerEngineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/trigger_engine/index.handler
+      Environment:
+        Variables:
+          MOCK_TRIGGERS: 'true'
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CallStateTable
+        - DynamoDBWritePolicy:
+            TableName: !Ref CallStateTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: !GetAtt EventBus.Arn
+
+  RetrievalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/retrieval_service/index.handler
+      Environment:
+        Variables:
+          MOCK_RETRIEVAL: 'true'
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: !GetAtt EventBus.Arn
+
+  LlmPhrasingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/llm_phrasing_service/index.handler
+      Environment:
+        Variables:
+          MOCK_LLM: 'true'
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref CallStateTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: !GetAtt EventBus.Arn
+
+  WsDispatcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/ws_dispatcher/index.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConnectionsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:ManageConnections
+              Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/${StageName}/POST/@connections/*"
+
+  WsConnectionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/ws_connection_handler/index.handler
+
+  WsRegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/ws_register_handler/index.handler
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref ConnectionsTable
+
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: CallCopilotWebSocket
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebSocketApi
+      StageName: !Ref StageName
+      AutoDeploy: true
+
+  WsConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsConnectionFunction.Arn}/invocations"
+
+  WsRegisterIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsRegisterFunction.Arn}/invocations"
+
+  WsAudioIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AudioStreamFunction.Arn}/invocations"
+
+  WsConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $connect
+      Target: !Sub "integrations/${WsConnectIntegration}"
+
+  WsRegisterRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: register
+      Target: !Sub "integrations/${WsRegisterIntegration}"
+
+  WsAudioRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: audio_chunk
+      Target: !Sub "integrations/${WsAudioIntegration}"
+
+  WsConnectPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WsConnectionFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/$connect"
+
+  WsRegisterPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WsRegisterFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/register"
+
+  WsAudioPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AudioStreamFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/audio_chunk"
+
+  AudioChunkRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source: [call.copilot]
+        detail-type: [audio.chunk]
+      Targets:
+        - Arn: !GetAtt SttStreamFunction.Arn
+          Id: SttStreamTarget
+
+  TranscriptFinalRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source: [call.copilot]
+        detail-type: [transcript.final]
+      Targets:
+        - Arn: !GetAtt ContextEngineFunction.Arn
+          Id: ContextTarget
+        - Arn: !GetAtt WsDispatcherFunction.Arn
+          Id: WsTranscriptFinalTarget
+
+  TranscriptPartialRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source: [call.copilot]
+        detail-type: [transcript.partial]
+      Targets:
+        - Arn: !GetAtt WsDispatcherFunction.Arn
+          Id: WsTranscriptPartialTarget
+
+  ContextUpdatedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source: [call.copilot]
+        detail-type: [context.updated]
+      Targets:
+        - Arn: !GetAtt TriggerEngineFunction.Arn
+          Id: TriggerTarget
+
+  TriggerFiredRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source: [call.copilot]
+        detail-type: [trigger.fired]
+      Targets:
+        - Arn: !GetAtt RetrievalFunction.Arn
+          Id: RetrievalTarget
+
+  FactsRetrievedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source: [call.copilot]
+        detail-type: [facts.retrieved]
+      Targets:
+        - Arn: !GetAtt LlmPhrasingFunction.Arn
+          Id: LlmTarget
+
+  AssistCardReadyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source: [call.copilot]
+        detail-type: [assist.card.ready]
+      Targets:
+        - Arn: !GetAtt WsDispatcherFunction.Arn
+          Id: WsAssistTarget
+
+  AudioChunkPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SttStreamFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AudioChunkRule.Arn
+
+  TranscriptFinalPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ContextEngineFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TranscriptFinalRule.Arn
+
+  TranscriptPartialPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WsDispatcherFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TranscriptPartialRule.Arn
+
+  ContextUpdatedPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref TriggerEngineFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ContextUpdatedRule.Arn
+
+  TriggerFiredPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RetrievalFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TriggerFiredRule.Arn
+
+  FactsRetrievedPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref LlmPhrasingFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt FactsRetrievedRule.Arn
+
+  AssistCardReadyPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WsDispatcherFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AssistCardReadyRule.Arn
+
+Outputs:
+  RestApiUrl:
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+  WebSocketUrl:
+    Value: !Sub "wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+  EventBusName:
+    Value: !Ref EventBusName
+  CallStateTable:
+    Value: !Ref CallStateTable
+  ConnectionsTable:
+    Value: !Ref ConnectionsTable
+  RecordingsBucket:
+    Value: !Ref RecordingsBucket
