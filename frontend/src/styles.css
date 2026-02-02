@@ -108,6 +108,18 @@ button:disabled {
   font-style: italic;
 }
 
+.segment.provisional {
+  background: #eef0f6;
+}
+
+.segment.provisional .speaker {
+  color: #6b7280;
+}
+
+.segment.provisional .text {
+  color: #4b5563;
+}
+
 .speaker {
   font-weight: 700;
   font-size: 12px;

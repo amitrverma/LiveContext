@@ -14,6 +14,7 @@ export default function App() {
   const [wsUrl, setWsUrl] = useState(WS_URL)
   const [segments, setSegments] = useState([])
   const [partialText, setPartialText] = useState('')
+  const [partialUpdatedAt, setPartialUpdatedAt] = useState(0)
   const [assistCard, setAssistCard] = useState(null)
   const [status, setStatus] = useState('idle')
   const [isUploading, setIsUploading] = useState(false)
@@ -31,10 +32,23 @@ export default function App() {
   const handleWsMessage = (payload) => {
     if (payload.type === 'transcript.partial') {
       setPartialText(payload.text)
+      setPartialUpdatedAt(Date.now())
     }
     if (payload.type === 'transcript.final') {
       setPartialText('')
-      setSegments((prev) => [...prev, payload.segment])
+      setPartialUpdatedAt(0)
+      setSegments((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (last?.provisional) {
+          const finalText = payload.segment?.text || ''
+          if (last.text === finalText || finalText.includes(last.text) || last.text.includes(finalText)) {
+            next.pop()
+          }
+        }
+        next.push(payload.segment)
+        return next
+      })
     }
     if (payload.type === 'assist.card') {
       setAssistCard(payload.card)
@@ -144,6 +158,38 @@ export default function App() {
 
     return () => demoStopRef.current?.()
   }, [status])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!partialText || !partialUpdatedAt) {
+        return
+      }
+      const ageMs = Date.now() - partialUpdatedAt
+      if (ageMs < 4000) {
+        return
+      }
+      const snapshot = partialText
+      setSegments((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (last?.provisional && last.text === snapshot) {
+          return prev
+        }
+        next.push({
+          call_id: callId,
+          speaker: 'CUSTOMER',
+          text: snapshot,
+          end_time: Date.now() / 1000,
+          provisional: true
+        })
+        return next
+      })
+      setPartialText('')
+      setPartialUpdatedAt(0)
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [partialText, partialUpdatedAt, callId])
 
   return (
     <div className="app">

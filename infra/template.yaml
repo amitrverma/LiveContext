@@ -393,6 +393,13 @@ Resources:
       RouteKey: audio_chunk
       Target: !Sub "integrations/${WsAudioIntegration}"
 
+  WsAudioEndRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: audio_end
+      Target: !Sub "integrations/${WsAudioIntegration}"
+
   WsConnectPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -416,6 +423,14 @@ Resources:
       FunctionName: !Ref AudioStreamFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/audio_chunk"
+
+  WsAudioEndPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AudioStreamFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/audio_end"
 
   AudioChunkRule:
     Type: AWS::Events::Rule

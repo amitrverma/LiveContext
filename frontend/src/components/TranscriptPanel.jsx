@@ -6,7 +6,7 @@ export default function TranscriptPanel({ partialText, segments }) {
       <h2>Incremental Transcript</h2>
       <div className="transcript">
         {segments.map((segment, index) => (
-          <div key={`${segment.end_time}-${index}`} className="segment">
+          <div key={`${segment.end_time}-${index}`} className={`segment${segment.provisional ? ' provisional' : ''}`}>
             <span className="speaker">{segment.speaker}</span>
             <span className="text">{segment.text}</span>
           </div>

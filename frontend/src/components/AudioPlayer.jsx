@@ -113,6 +113,12 @@ export default function AudioPlayer({ onAudioChunk, onPlayStateChange, disabled,
 
   const handlePlay = async () => {
     setupAudioGraph()
+    if (contextRef.current?.state === 'suspended') {
+      await contextRef.current.resume()
+    }
+    if (audioRef.current) {
+      audioRef.current.muted = false
+    }
     await audioRef.current.play()
     onPlayStateChange?.('playing')
   }

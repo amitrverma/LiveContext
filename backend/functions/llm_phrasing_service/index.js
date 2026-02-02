@@ -3,7 +3,10 @@ const { emitEvent } = require('../../lib/events')
 const { DETAIL_TYPES } = require('../../lib/constants')
 const { updateCallState } = require('../../lib/dynamo')
 
-async function phraseNextStep(facts, contextSnippet) {
+async function phraseNextStep(facts, contextSnippet, overrides = []) {
+  if (overrides.length) {
+    return overrides[0]
+  }
   if (process.env.MOCK_LLM === 'true') {
     return 'Acknowledge the issue and offer a resolution option.'
   }
@@ -25,7 +28,7 @@ exports.handler = async (event) => {
   }
 
   const selectedFacts = facts.slice(0, 2)
-  const nextStep = await phraseNextStep(selectedFacts, detail.context_snippet || '')
+  const nextStep = await phraseNextStep(selectedFacts, detail.context_snippet || '', detail.next_steps || [])
 
   if (!nextStep) {
     return
@@ -36,7 +39,7 @@ exports.handler = async (event) => {
     call_id: callId,
     facts: selectedFacts,
     next_step: nextStep,
-    insights: {
+    insights: detail.insights || {
       sentiment: 'unknown',
       risk: 'unknown'
     },
