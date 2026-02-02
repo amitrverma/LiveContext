@@ -102,9 +102,12 @@ You can pass a JSON event file as the second argument.
 - `CONNECTIONS_TABLE`
 - `S3_BUCKET`
 - `WS_API_ENDPOINT`
+- `TRANSCRIBE_MODE` (`streaming` or `batch`)
+- `TRANSCRIBE_LANGUAGE` (default: `en-US`)
 - `MOCK_STT`, `MOCK_TRIGGERS`, `MOCK_RETRIEVAL`, `MOCK_LLM`
 
 ## Notes
 - Business logic for triggers, retrieval, and LLM phrasing is intentionally stubbed with TODOs.
 - The mock flags allow you to test the pipeline without external dependencies.
 - Audio playback and transcription never pause; all processing is async and event-driven.
+  - In batch mode, transcription runs after the recording is uploaded to S3 and emits final segments when the job completes.

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import AudioPlayer from './components/AudioPlayer.jsx'
 import TranscriptPanel from './components/TranscriptPanel.jsx'
 import AssistPanel from './components/AssistPanel.jsx'
-import { connectWebSocket, createCall, startCall } from './api.js'
+import { connectWebSocket, createCall, startCall, uploadCallRecording } from './api.js'
 import { startDemoStream } from './mock/demoStream.js'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
@@ -16,6 +16,8 @@ export default function App() {
   const [partialText, setPartialText] = useState('')
   const [assistCard, setAssistCard] = useState(null)
   const [status, setStatus] = useState('idle')
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState(null)
   const wsRef = useRef(null)
   const demoStopRef = useRef(null)
 
@@ -23,6 +25,7 @@ export default function App() {
     setSegments([])
     setPartialText('')
     setAssistCard(null)
+    setUploadError(null)
   }
 
   const handleWsMessage = (payload) => {
@@ -58,6 +61,9 @@ export default function App() {
     setStatus(nextStatus)
 
     if (nextStatus === 'playing') {
+      if (isUploading) {
+        return
+      }
       const activeCallId = await ensureCall()
       if (!DEMO_MODE && activeCallId) {
         await startCall(API_BASE_URL, activeCallId)
@@ -78,9 +84,34 @@ export default function App() {
     }
   }
 
-  const handleFileSelected = async () => {
+  const handleAudioEnd = () => {
+    if (DEMO_MODE || !callId) {
+      return
+    }
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        action: 'audio_end',
+        call_id: callId
+      }))
+    }
+  }
+
+  const handleFileSelected = async (file) => {
     resetSession()
-    await ensureCall()
+    const activeCallId = await ensureCall()
+    if (DEMO_MODE || !activeCallId || !file) {
+      return
+    }
+
+    setIsUploading(true)
+    setUploadError(null)
+    try {
+      await uploadCallRecording(API_BASE_URL, activeCallId, file)
+    } catch (error) {
+      setUploadError(error.message || 'Upload failed')
+    } finally {
+      setIsUploading(false)
+    }
   }
 
   useEffect(() => {
@@ -118,18 +149,21 @@ export default function App() {
     <div className="app">
       <header className="header">
         <div className="title">Call Copilot POC</div>
-        <div className="status">Status: {status}</div>
+        <div className="status">Status: {isUploading ? 'uploading' : status}</div>
       </header>
       <main className="grid">
         <AudioPlayer
           onAudioChunk={handleAudioChunk}
+          onStreamEnd={handleAudioEnd}
           onPlayStateChange={handlePlayStateChange}
           onFileSelected={handleFileSelected}
           demoMode={DEMO_MODE}
+          disabled={isUploading}
         />
         <TranscriptPanel partialText={partialText} segments={segments} />
         <AssistPanel assistCard={assistCard} />
       </main>
+      {uploadError ? <div className="error">Upload error: {uploadError}</div> : null}
     </div>
   )
 }

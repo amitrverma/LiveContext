@@ -4,10 +4,9 @@ version = 0.1
 stack_name = "call-copilot-poc"
 resolve_s3 = true
 s3_prefix = "call-copilot-poc"
-region = "us-west-2"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "StageName=\"prod\" EventBusName=\"CallCopilotBus\" CallStateTableName=\"CallStateTable\" ConnectionsTableName=\"ConnectionsTable\" RecordingsBucketName=\"\""
+parameter_overrides = "StageName=\"prod\" EventBusName=\"CallCopilotBus\" CallStateTableName=\"CallStateTable\" ConnectionsTableName=\"ConnectionsTable\" RecordingsBucketName=\"\" TranscribeMode=\"streaming\""
 image_repositories = []
 
 [default.global.parameters]

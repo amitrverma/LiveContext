@@ -8,8 +8,11 @@ async function phraseNextStep(facts, contextSnippet) {
     return 'Acknowledge the issue and offer a resolution option.'
   }
 
-  // TODO: Implement Bedrock or OpenAI-compatible phrasing call.
-  return null
+  const primaryFact = facts[0] || 'the customer account'
+  if (contextSnippet) {
+    return `Acknowledge the issue, confirm ${primaryFact}, and propose the next action.`
+  }
+  return `Acknowledge the issue, confirm ${primaryFact}, and ask a follow-up question.`
 }
 
 exports.handler = async (event) => {

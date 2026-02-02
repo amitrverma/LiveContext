@@ -1,5 +1,7 @@
+const path = require('path')
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3')
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
+const { updateCallState } = require('../../lib/dynamo')
 
 const client = new S3Client({})
 
@@ -17,14 +19,22 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers: corsHeaders, body: 'call_id is required' }
   }
 
-  const key = `calls/${callId}/recording.wav`
+  const fileName = body.file_name || 'recording.wav'
+  const ext = path.extname(fileName) || '.wav'
+  const contentType = body.content_type || 'audio/wav'
+  const key = `calls/${callId}/recording${ext}`
   const command = new PutObjectCommand({
     Bucket: process.env.S3_BUCKET,
     Key: key,
-    ContentType: 'audio/wav'
+    ContentType: contentType
   })
 
   const uploadUrl = await getSignedUrl(client, command, { expiresIn: 3600 })
+
+  await updateCallState(callId, {
+    recording_s3_key: key,
+    recording_content_type: contentType
+  })
 
   return {
     statusCode: 200,

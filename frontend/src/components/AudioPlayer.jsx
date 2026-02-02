@@ -20,7 +20,7 @@ function toBase64(buffer) {
   return btoa(binary)
 }
 
-export default function AudioPlayer({ onAudioChunk, onPlayStateChange, disabled, demoMode, onFileSelected }) {
+export default function AudioPlayer({ onAudioChunk, onPlayStateChange, disabled, demoMode, onFileSelected, onStreamEnd }) {
   const audioRef = useRef(null)
   const contextRef = useRef(null)
   const processorRef = useRef(null)
@@ -28,6 +28,37 @@ export default function AudioPlayer({ onAudioChunk, onPlayStateChange, disabled,
   const [fileName, setFileName] = useState('')
   const [isReady, setIsReady] = useState(false)
   const sequenceRef = useRef(0)
+  const pendingChunksRef = useRef([])
+  const pendingLengthRef = useRef(0)
+  const lastFlushRef = useRef(0)
+  const BATCH_INTERVAL_MS = 250
+
+  const flushPending = () => {
+    if (!contextRef.current) {
+      return
+    }
+    const totalLength = pendingLengthRef.current
+    if (!totalLength) {
+      return
+    }
+    const combined = new Uint8Array(totalLength)
+    let offset = 0
+    for (const chunk of pendingChunksRef.current) {
+      combined.set(chunk, offset)
+      offset += chunk.length
+    }
+    pendingChunksRef.current = []
+    pendingLengthRef.current = 0
+
+    const payload = {
+      sequence: sequenceRef.current,
+      audio_base64: toBase64(combined.buffer),
+      sample_rate: contextRef.current.sampleRate,
+      channels: 1
+    }
+    sequenceRef.current += 1
+    onAudioChunk?.(payload)
+  }
 
   const setupAudioGraph = () => {
     if (!audioRef.current || contextRef.current) {
@@ -44,14 +75,18 @@ export default function AudioPlayer({ onAudioChunk, onPlayStateChange, disabled,
       }
       const channelData = event.inputBuffer.getChannelData(0)
       const pcmBuffer = floatToPcm16(channelData)
-      const payload = {
-        sequence: sequenceRef.current,
-        audio_base64: toBase64(pcmBuffer),
-        sample_rate: context.sampleRate,
-        channels: 1
+      const chunk = new Uint8Array(pcmBuffer)
+      pendingChunksRef.current.push(chunk)
+      pendingLengthRef.current += chunk.length
+
+      const now = Date.now()
+      if (!lastFlushRef.current) {
+        lastFlushRef.current = now
       }
-      sequenceRef.current += 1
-      onAudioChunk?.(payload)
+      if (now - lastFlushRef.current >= BATCH_INTERVAL_MS) {
+        lastFlushRef.current = now
+        flushPending()
+      }
     }
 
     source.connect(processor)
@@ -84,15 +119,20 @@ export default function AudioPlayer({ onAudioChunk, onPlayStateChange, disabled,
 
   const handlePause = () => {
     audioRef.current.pause()
+    flushPending()
+    onStreamEnd?.()
     onPlayStateChange?.('paused')
   }
 
   const handleEnded = () => {
+    flushPending()
+    onStreamEnd?.()
     onPlayStateChange?.('ended')
   }
 
   useEffect(() => {
     return () => {
+      flushPending()
       processorRef.current?.disconnect()
       sourceRef.current?.disconnect()
       contextRef.current?.close()

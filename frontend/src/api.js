@@ -14,6 +14,35 @@ export async function startCall(apiBaseUrl, callId) {
   return response.json()
 }
 
+export async function uploadCallRecording(apiBaseUrl, callId, file) {
+  const response = await fetch(`${apiBaseUrl}/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      call_id: callId,
+      file_name: file.name,
+      content_type: file.type || 'application/octet-stream'
+    })
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to request upload URL')
+  }
+
+  const payload = await response.json()
+  const uploadResponse = await fetch(payload.upload_url, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file
+  })
+
+  if (!uploadResponse.ok) {
+    throw new Error('Failed to upload recording')
+  }
+
+  return payload
+}
+
 export function connectWebSocket(wsUrl, callId, handlers) {
   const socket = new WebSocket(`${wsUrl}?call_id=${callId}`)
 

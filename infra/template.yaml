@@ -18,6 +18,9 @@ Parameters:
   RecordingsBucketName:
     Type: String
     Default: ''
+  TranscribeMode:
+    Type: String
+    Default: streaming
 
 Conditions:
   UseCustomBucketName: !Not [!Equals [!Ref RecordingsBucketName, '']]
@@ -35,6 +38,8 @@ Globals:
         S3_BUCKET: !Ref RecordingsBucket
         WS_API_ENDPOINT: !Sub "https://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
         WS_URL: !Sub "wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+        TRANSCRIBE_MODE: !Ref TranscribeMode
+        TRANSCRIBE_LANGUAGE: en-US
 
 Resources:
   CallStateTable:
@@ -69,6 +74,44 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !If [UseCustomBucketName, !Ref RecordingsBucketName, !Ref AWS::NoValue]
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - "http://localhost:5173"
+            AllowedMethods:
+              - PUT
+              - GET
+              - HEAD
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3000
+
+  RecordingsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RecordingsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowTranscribeAccess
+            Effect: Allow
+            Principal:
+              Service: transcribe.amazonaws.com
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListBucket
+              - s3:GetBucketLocation
+            Resource:
+              - !Sub "arn:aws:s3:::${RecordingsBucket}"
+              - !Sub "arn:aws:s3:::${RecordingsBucket}/*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:transcribe:${AWS::Region}:${AWS::AccountId}:transcription-job/*"
 
   EventBus:
     Type: AWS::Events::EventBus
@@ -107,8 +150,17 @@ Resources:
       CodeUri: ../backend
       Handler: functions/start_call_handler/index.handler
       Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref RecordingsBucket
+        - DynamoDBReadPolicy:
+            TableName: !Ref CallStateTable
         - DynamoDBWritePolicy:
             TableName: !Ref CallStateTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - transcribe:StartTranscriptionJob
+              Resource: '*'
       Events:
         StartCall:
           Type: Api
@@ -125,6 +177,8 @@ Resources:
       Policies:
         - S3WritePolicy:
             BucketName: !Ref RecordingsBucket
+        - DynamoDBWritePolicy:
+            TableName: !Ref CallStateTable
       Events:
         Upload:
           Type: Api
@@ -144,6 +198,11 @@ Resources:
               Action:
                 - events:PutEvents
               Resource: !GetAtt EventBus.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - transcribe:StartStreamTranscription
+              Resource: '*'
 
   SttStreamFunction:
     Type: AWS::Serverless::Function
@@ -152,13 +211,18 @@ Resources:
       Handler: functions/stt_stream_handler/index.handler
       Environment:
         Variables:
-          MOCK_STT: 'true'
+          MOCK_STT: 'false'
       Policies:
         - Statement:
             - Effect: Allow
               Action:
                 - events:PutEvents
               Resource: !GetAtt EventBus.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - transcribe:StartStreamTranscription
+              Resource: '*'
 
   ContextEngineFunction:
     Type: AWS::Serverless::Function
@@ -183,7 +247,7 @@ Resources:
       Handler: functions/trigger_engine/index.handler
       Environment:
         Variables:
-          MOCK_TRIGGERS: 'true'
+          MOCK_TRIGGERS: 'false'
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref CallStateTable
@@ -217,10 +281,27 @@ Resources:
       Handler: functions/llm_phrasing_service/index.handler
       Environment:
         Variables:
-          MOCK_LLM: 'true'
+          MOCK_LLM: 'false'
       Policies:
         - DynamoDBWritePolicy:
             TableName: !Ref CallStateTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: !GetAtt EventBus.Arn
+
+  TranscribeJobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: functions/transcribe_job_handler/index.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - transcribe:GetTranscriptionJob
+              Resource: '*'
         - Statement:
             - Effect: Allow
               Action:
@@ -415,6 +496,18 @@ Resources:
         - Arn: !GetAtt WsDispatcherFunction.Arn
           Id: WsAssistTarget
 
+  TranscribeJobRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source: [aws.transcribe]
+        detail-type: ['Transcribe Job State Change']
+        detail:
+          TranscriptionJobStatus: ['COMPLETED']
+      Targets:
+        - Arn: !GetAtt TranscribeJobFunction.Arn
+          Id: TranscribeJobTarget
+
   AudioChunkPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -470,6 +563,14 @@ Resources:
       FunctionName: !Ref WsDispatcherFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt AssistCardReadyRule.Arn
+
+  TranscribeJobPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref TranscribeJobFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TranscribeJobRule.Arn
 
 Outputs:
   RestApiUrl:
